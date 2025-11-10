@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pixel Math Worksheet Generator</title>
+<style>
+  :root { --ui-bg:#111; --ui-fg:#eee; --accent:#4ad; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; background:#0b0b0b; color:var(--ui-fg); }
+  header { padding:16px 18px 8px; }
+  h1 { margin:0 0 10px; font-size:20px; letter-spacing:.2px; }
+
+  #controls {
+    display:grid; gap:10px;
+    grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    padding:0 18px 14px;
+  }
+  .card { background:var(--ui-bg); border:1px solid #1f1f1f; border-radius:10px; padding:14px; }
+  .label { font-size:12px; color:#bbb; margin-bottom:6px; }
+  input[type="number"]{
+    width:100%; padding:8px 10px; border-radius:8px;
+    border:1px solid #222; background:#181818; color:var(--ui-fg);
+  }
+  button{
+    appearance:none; border:1px solid #233; border-radius:10px;
+    padding:10px 12px; background:#17212b; color:#e9f4ff; cursor:pointer; font-weight:600;
+  }
+  button:hover{ filter:brightness(1.08); }
+  button.secondary{ background:#1a1a1a; color:#ddd; border-color:#2a2a2a; }
+  .row{ display:flex; gap:10px; flex-wrap:wrap; }
+  .grow{ flex:1 1 auto; }
+
+  #drop{
+    border:2px dashed #2b2b2b; border-radius:12px; padding:18px; text-align:center;
+    background:#121212; color:#ccc; transition:border-color .15s ease, background .15s ease; cursor:pointer;
+  }
+  #drop.drag{ border-color:var(--accent); background:#0e1620; color:#e3f2ff; }
+
+  #previews{ display:grid; gap:12px; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); padding:0 18px 18px; }
+  canvas.preview, img.preview{
+    width:100%; background:#101010; border-radius:8px; border:1px solid #222; display:block;
+  }
+  .note{ color:#aaa; font-size:12px; margin-top:6px; }
+
+  /* Print: only show the two worksheet images */
+  @media print {
+    body { background:#fff; }
+    header, #controls, #previews { display:none !important; }
+    #printWrap { display:block !important; }
+    @page { size:auto; margin:12mm; }
+  }
+  #printWrap { display:none; }
+  #printWrap img { width:100%; height:auto; display:block; }
+  .page-break { break-before:page; page-break-before:always; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Pixel Math Worksheet Generator</h1>
+  </header>
+
+  <section id="controls">
+    <div class="card">
+      <div id="drop">
+        <strong>Drop an image here</strong><br/>or click to choose
+        <input id="file" type="file" accept="image/*" style="display:none" />
+      </div>
+      <div class="note">Tip: square/compact images work best for larger grids.</div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div class="grow">
+          <div class="label">Number of pixels across</div>
+          <input id="cols" type="number" min="4" max="96" step="1" value="24" />
+        </div>
+        <div class="grow">
+          <div class="label">Number of pixels down</div>
+          <input id="rows" type="number" min="4" max="96" step="1" value="24" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="grow">
+          <div class="label">Number of colors to use</div>
+          <input id="kcolors" type="number" min="2" max="12" step="1" value="6" />
+        </div>
+        <!-- NEW: target region size -->
+        <div class="grow">
+          <div class="label">Approx. Region Size (cells)</div>
+          <input id="targetRegion" type="number" min="1" max="500" step="1" value="4" />
+        </div>
+      </div>
+
+      <div class="card" id="answersCard" style="display:none">
+        <div class="label">Answer Value for Each Color</div>
+        <div id="answersContainer"></div>
+      </div>
+      
+      <div class="row">
+  <div class="grow">
+    <div class="label">Problem Type</div>
+    <select id="problemType" style="width:100%; padding:8px 10px; border-radius:8px;
+      border:1px solid #222; background:#181818; color:var(--ui-fg);">
+      <option value="add">Addition</option>
+      <option value="sub">Subtraction</option>
+      <option value="mul">Multiplication</option>
+    </select>
+  </div>
+</div>
+      
+      <div class="row">
+        <div class="grow">
+          <div class="label">Font Size (max)</div>
+          <input id="fontScale" type="number" min="6" max="72" step="0.5" value="18.0" />
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="btnPixelate" class="grow">Pixelate</button>
+        <button id="btnGenerate" class="grow">Generate</button>
+      </div>
+      
+      <div class="row" style="margin-top:4px;">
+        <label style="display:flex;align-items:center;gap:6px;">
+          <input id="includeAnswerKey" type="checkbox" checked />
+          Include Answer Key in PDF
+        </label>
+      </div>
+      
+      <div class="row">
+        <button id="btnSave" class="grow secondary">Save PDF</button>
+      </div>
+      <div class="note">“Save PDF” opens the print dialog; choose “Save as PDF”.</div>
+    </div>
+    
+    <div class="card">
+      <div class="label">Original (fit)</div>
+      <canvas id="origCanvas" class="preview"></canvas>
+    </div>
+
+    <div class="card">
+      <div class="label">Pixelated preview</div>
+      <canvas id="pixCanvas" class="preview"></canvas>
+      <div class="note">Click “Generate” to see worksheet and answer previews.</div>
+    </div>
+
+    <div class="card">
+      <div class="label">Worksheet preview (used for PDF page 1)</div>
+      <img id="worksheetPreview" class="preview" alt="worksheet preview"/>
+    </div>
+
+    <div class="card">
+      <div class="label">Answer key preview (used for PDF page 2)</div>
+      <img id="answerPreview" class="preview" alt="answer preview"/>
+    </div>
+  </section>
+
+  <!-- Print-only images (2 pages) -->
+  <section id="printWrap">
+    <img id="worksheetPrint" alt="worksheet print image"/>
+    <img id="answerPrint" class="page-break" alt="answer print image"/>
+  </section>
+
+<script>
+(() => {
+  // ---- State
+  let img = new Image();
+  let imgLoaded = false;
+
+  const colsEl = document.getElementById('cols');
+  const rowsEl = document.getElementById('rows');
+  const kEl    = document.getElementById('kcolors');
+  const targetRegionEl = document.getElementById('targetRegion');
+  const includeAnswerKeyEl = document.getElementById('includeAnswerKey');
+  const fontScaleEl = document.getElementById('fontScale');
+
+  const origCanvas = document.getElementById('origCanvas');
+  const pixCanvas  = document.getElementById('pixCanvas');
+  const octx = origCanvas.getContext('2d');
+  const pctx = pixCanvas.getContext('2d');
+
+  const worksheetPreviewImg = document.getElementById('worksheetPreview');
+  const answerPreviewImg    = document.getElementById('answerPreview');
+  const worksheetPrintImg   = document.getElementById('worksheetPrint');
+  const answerPrintImg      = document.getElementById('answerPrint');
+
+  let gridW=0, gridH=0;
+  let cellColors = []; // raw downsampled
+  let palette = [];    // [{r,g,b,hex}]
+  let indices = [];    // palette index per cell
+
+  // Regions (merged blocks)
+  let blocks = [];     // [{colorIndex, cells:[linearIdx...], rect:{x,y,w,h}, problem}]
+  let cellToBlock = []; // maps cell linear index -> block index
+
+  // Keep page dimensions consistent between pages
+  let lastPageW = 1800;
+  let lastPageH = 0; // set after worksheet render
+
+  // ---- Helpers
+  const clamp = (v,a,b) => Math.max(a, Math.min(b, v|0));
+  const rgbToHex = (r,g,b) => '#' + [r,g,b].map(x => x.toString(16).padStart(2,'0')).join('');
+  const lin = (x,y)=> y*gridW + x;
+  const unlin = (i)=> [i%gridW, (i/gridW|0)];
+
+  function drawOrigFit() {
+    if (!imgLoaded) { octx.clearRect(0,0,origCanvas.width,origCanvas.height); return; }
+    const maxW = 600;
+    const scale = Math.min(1, maxW / img.width);
+    origCanvas.width = Math.round(img.width * scale);
+    origCanvas.height = Math.round(img.height * scale);
+    octx.imageSmoothingEnabled = true;
+    octx.clearRect(0,0,origCanvas.width,origCanvas.height);
+    octx.drawImage(img, 0, 0, origCanvas.width, origCanvas.height);
+  }
+
+  function sampleToGrid(w, h) {
+    gridW = clamp(w, 4, 256);
+    gridH = clamp(h, 4, 256);
+
+    const tmp = document.createElement('canvas');
+    tmp.width = img.width;
+    tmp.height = img.height;
+    const tctx = tmp.getContext('2d', { willReadFrequently: true });
+    tctx.drawImage(img, 0, 0);
+
+    const data = tctx.getImageData(0, 0, img.width, img.height).data;
+    cellColors = new Array(gridW * gridH);
+
+    const stepX = img.width / gridW;
+    const stepY = img.height / gridH;
+
+    for (let y = 0; y < gridH; y++) {
+      for (let x = 0; x < gridW; x++) {
+        const cx = Math.floor((x + 0.5) * stepX);
+        const cy = Math.floor((y + 0.5) * stepY);
+        const idx = (cy * img.width + cx) * 4;
+        const r = data[idx], g = data[idx + 1], b = data[idx + 2];
+        cellColors[y * gridW + x] = { r, g, b };
+      }
+    }
+  }
+
+  function clusterQuantize(maxColors, tolerance = 25) {
+    const clusters = [];
+    for (const pix of cellColors) {
+      let found = false;
+      for (const cl of clusters) {
+        const dr = pix.r - cl.r;
+        const dg = pix.g - cl.g;
+        const db = pix.b - cl.b;
+        const dist = Math.sqrt(dr*dr + dg*dg + db*db);
+        if (dist < tolerance) {
+          cl.r = (cl.r * cl.count + pix.r) / (cl.count + 1);
+          cl.g = (cl.g * cl.count + pix.g) / (cl.count + 1);
+          cl.b = (cl.b * cl.count + pix.b) / (cl.count + 1);
+          cl.count++;
+          found = true;
+          break;
+        }
+      }
+      if (!found) clusters.push({ r: pix.r, g: pix.g, b: pix.b, count: 1 });
+    }
+
+    function distance(a, b) {
+      const dr = a.r - b.r, dg = a.g - b.g, db = a.b - b.b;
+      return dr*dr + dg*dg + db*db;
+    }
+
+    while (clusters.length > maxColors) {
+      let minD = Infinity, ai = 0, bi = 1;
+      for (let i = 0; i < clusters.length; i++) {
+        for (let j = i + 1; j < clusters.length; j++) {
+          const d = distance(clusters[i], clusters[j]);
+          if (d < minD) { minD = d; ai = i; bi = j; }
+        }
+      }
+      const a = clusters[ai], b = clusters[bi];
+      const total = a.count + b.count;
+      a.r = (a.r * a.count + b.r * b.count) / total;
+      a.g = (a.g * a.count + b.g * b.count) / total;
+      a.b = (a.b * a.count + b.b * b.count) / total;
+      a.count = total;
+      clusters.splice(bi, 1);
+    }
+
+    const pal = clusters.map(c => {
+      const R = Math.round(c.r), G = Math.round(c.g), B = Math.round(c.b);
+      const hex = rgbToHex(R, G, B);
+      const lum = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+      return { r:R, g:G, b:B, hex, lum };
+    }).sort((a, b) => a.lum - b.lum);
+
+    indices = new Array(cellColors.length);
+    for (let i = 0; i < cellColors.length; i++) {
+      const p = cellColors[i];
+      let best = 0, bd = Infinity;
+      for (let c = 0; c < pal.length; c++) {
+        const d = (p.r-pal[c].r)**2 + (p.g-pal[c].g)**2 + (p.b-pal[c].b)**2;
+        if (d < bd) { bd = d; best = c; }
+      }
+      indices[i] = best;
+    }
+
+    palette = pal;
+  }
+
+  function drawPixelatedPreview() {
+    const scale = 10;
+    pixCanvas.width = gridW*scale;
+    pixCanvas.height = gridH*scale;
+    pctx.clearRect(0,0,pixCanvas.width,pixCanvas.height);
+    for (let y=0;y<gridH;y++){
+      for (let x=0;x<gridW;x++){
+        const idx = indices[y*gridW+x];
+        pctx.fillStyle = palette[idx].hex;
+        pctx.fillRect(x*scale, y*scale, scale, scale);
+      }
+    }
+    // Keep light grid in preview to help users (worksheet itself has no grid)
+    pctx.strokeStyle = 'rgba(0,0,0,.35)';
+    for (let x=0;x<=gridW;x++){ pctx.beginPath(); pctx.moveTo(x*scale+.5, 0); pctx.lineTo(x*scale+.5, gridH*scale); pctx.stroke(); }
+    for (let y=0;y<=gridH;y++){ pctx.beginPath(); pctx.moveTo(0, y*scale+.5); pctx.lineTo(gridW*scale, y*scale+.5); pctx.stroke(); }
+  }
+
+  function makeProblem(answerNum) {
+  const type = document.getElementById('problemType').value;
+
+  if (type === "sub") {
+    // a - b = answerNum   → ensure a ≥ b
+    const a = Math.floor(Math.random() * (answerNum + 6)) + answerNum; 
+    const b = a - answerNum;
+    return `${a} − ${b}`;
+  }
+
+  if (type === "mul") {
+    // a × b = answerNum
+    const factors = [];
+    for (let i = 1; i <= Math.sqrt(answerNum); i++) {
+      if (answerNum % i === 0) factors.push([i, answerNum / i]);
+    }
+    if (factors.length === 0) return `${answerNum} × 1`; // fallback
+    const [a, b] = factors[Math.floor(Math.random() * factors.length)];
+    return `${a} × ${b}`;
+  }
+
+  // default: addition
+  let a = Math.floor(Math.random() * (answerNum + 1));
+  let b = answerNum - a;
+  if (a === 0 && answerNum > 1 && Math.random() < 0.6) { a = 1; b = answerNum - 1; }
+  return `${a} + ${b}`;
+}
+
+  // ===== Build Tetris-style regions (4-connected, same color), full partition =====
+  function buildTetrisRegions(targetSize = 4) {
+    const minSize = Math.max(1, Math.floor(targetSize * 0.6));
+    const maxSize = Math.max(minSize, Math.ceil(targetSize * 1.4));
+
+    blocks = [];
+    cellToBlock = new Array(gridW*gridH).fill(-1);
+
+    const inBounds = (x,y)=>(x>=0 && x<gridW && y>=0 && y<gridH);
+    const neighbors4 = (x,y)=>[[x-1,y],[x+1,y],[x,y-1],[x,y+1]].filter(([a,b])=>inBounds(a,b));
+
+    // First pass: create capped regions via BFS within same color
+    for (let y=0; y<gridH; y++){
+      for (let x=0; x<gridW; x++){
+        const i = lin(x,y);
+        if (cellToBlock[i] !== -1) continue;
+
+        const colorIndex = indices[i];
+        const q = [[x,y]];
+        const regionCells = [];
+        cellToBlock[i] = -2; // temp mark "in queue"
+
+        while (q.length && regionCells.length < maxSize) {
+          const [cx,cy] = q.shift();
+          const ci = lin(cx,cy);
+          if (cellToBlock[ci] === -1 || cellToBlock[ci] === -2) {
+            // ensure same color
+            if (indices[ci] === colorIndex) {
+              cellToBlock[ci] = -3; // temp mark "in region"
+              regionCells.push(ci);
+              // enqueue neighbors of same color that are unassigned
+              for (const [nx,ny] of neighbors4(cx,cy)) {
+                const ni = lin(nx,ny);
+                if (cellToBlock[ni] === -1 && indices[ni] === colorIndex) {
+                  cellToBlock[ni] = -2;
+                  q.push([nx,ny]);
+                }
+              }
+            }
+          }
+        }
+
+        // finalize block assignment
+        const blockIdx = blocks.length;
+        for (const ci of regionCells) cellToBlock[ci] = blockIdx;
+        blocks.push({ colorIndex, cells: regionCells });
+      }
+    }
+
+    // Build adjacency (same-color neighbor blocks), safe against removed blocks
+function buildAdjacency() {
+  const adj = Array.from({ length: blocks.length }, () => new Set());
+
+  for (let y = 0; y < gridH; y++) {
+    for (let x = 0; x < gridW; x++) {
+      const i = lin(x, y);
+      const b = cellToBlock[i];
+
+      if (b < 0 || !blocks[b]) continue;
+
+      // right neighbor
+      if (x + 1 < gridW) {
+        const r = lin(x + 1, y);
+        const br = cellToBlock[r];
+        if (br >= 0 && br !== b && blocks[br] && blocks[b].colorIndex === blocks[br].colorIndex) {
+          adj[b].add(br);
+          adj[br].add(b);
+        }
+      }
+
+      // down neighbor
+      if (y + 1 < gridH) {
+        const d = lin(x, y + 1);
+        const bd = cellToBlock[d];
+        if (bd >= 0 && bd !== b && blocks[bd] && blocks[b].colorIndex === blocks[bd].colorIndex) {
+          adj[b].add(bd);
+          adj[bd].add(b);
+        }
+      }
+    }
+  }
+
+  return adj;
+}
+
+    // Merge undersized regions into neighbors of same color
+    function mergeSmallRegions() {
+      let changed = true;
+      while (changed) {
+        changed = false;
+        const adj = buildAdjacency();
+        for (let b=0; b<blocks.length; b++) {
+          const block = blocks[b];
+          if (!block || !block.cells.length) continue;
+          if (block.cells.length >= minSize) continue;
+
+          // find best neighbor (same color) to absorb into
+          let best = -1, bestSize = -1;
+          for (const nb of adj[b]) {
+            const nbBlock = blocks[nb];
+            if (!nbBlock || !nbBlock.cells.length) continue;
+            if (nbBlock.colorIndex !== block.colorIndex) continue;
+            const sz = nbBlock.cells.length;
+            // prefer neighbor that keeps closer to target (but allow overflow if needed)
+            const projected = sz + block.cells.length;
+            const score = -Math.abs(projected - targetSize); // closer to target is better
+            // break ties by larger neighbor
+            const tiebreak = sz;
+            if (score > bestSize || (score===bestSize && tiebreak> (best>=0?blocks[best].cells.length:-1))) {
+              best = nb;
+              bestSize = score;
+            }
+          }
+          if (best !== -1) {
+            // reassign cells to best
+            for (const ci of block.cells) {
+              cellToBlock[ci] = best;
+              blocks[best].cells.push(ci);
+            }
+            block.cells = [];
+            changed = true;
+          }
+        }
+      }
+
+      // compact: remove empty blocks & remap ids
+      const mapOldToNew = new Map();
+      const newBlocks = [];
+      blocks.forEach((b, i) => {
+        if (b && b.cells.length) {
+          mapOldToNew.set(i, newBlocks.length);
+          newBlocks.push(b);
+        }
+      });
+      blocks = newBlocks;
+      // rebuild cellToBlock
+      cellToBlock.fill(-1);
+      blocks.forEach((b, bi)=> b.cells.forEach(ci=> cellToBlock[ci]=bi));
+    }
+
+    mergeSmallRegions();
+
+// Remove any empty or undefined blocks and rebuild indices
+{
+  const newBlocks = [];
+  const remap = new Map();
+  blocks.forEach((b, i) => {
+    if (b && b.cells && b.cells.length > 0) {
+      remap.set(i, newBlocks.length);
+      newBlocks.push(b);
+    }
+  });
+  blocks = newBlocks;
+
+  // Rebuild cellToBlock after compaction
+  cellToBlock.fill(-1);
+  blocks.forEach((b, bi) => {
+    b.cells.forEach(ci => cellToBlock[ci] = bi);
+  });
+}
+
+// Safety: ensure full coverage (no -1 left)
+for (let i=0; i<gridW*gridH; i++) {
+  if (cellToBlock[i] === -1) {
+    const bi = blocks.length;
+    blocks.push({ colorIndex: indices[i], cells: [i] });
+    cellToBlock[i] = bi;
+  }
+}
+
+// One more compaction pass to guarantee cleanliness
+{
+  const newBlocks = [];
+  const remap = new Map();
+  blocks.forEach((b, i) => {
+    if (b && b.cells && b.cells.length > 0) {
+      remap.set(i, newBlocks.length);
+      newBlocks.push(b);
+    }
+  });
+  blocks = newBlocks;
+
+  cellToBlock.fill(-1);
+  blocks.forEach((b, bi) => {
+    b.cells.forEach(ci => cellToBlock[ci] = bi);
+  });
+}
+
+
+    // Compute largest rectangle per block (for label placement)
+    for (const b of blocks) {
+      b.rect = findLargestRectangleInBlock(b);
+    }
+  }
+
+  // ===== Fast largest rectangle in a binary mask (full-cell, axis-aligned) =====
+  function findLargestRectangleInBlock(block) {
+    // Bounding box
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const idx of block.cells) {
+      const [x, y] = unlin(idx);
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+    const bw = maxX - minX + 1;
+    const bh = maxY - minY + 1;
+
+    // Binary mask
+    const mask = new Array(bw * bh).fill(0);
+    for (const idx of block.cells) {
+      const [x, y] = unlin(idx);
+      mask[(y - minY) * bw + (x - minX)] = 1;
+    }
+
+    // Histogram per row
+    const heights = new Array(bw).fill(0);
+    let bestArea = 0;
+    let best = { x: 0, y: 0, w: 1, h: 1 };
+
+    for (let y = 0; y < bh; y++) {
+      for (let x = 0; x < bw; x++) {
+        heights[x] = mask[y * bw + x] ? heights[x] + 1 : 0;
+      }
+      const stack = [];
+      let x = 0;
+      while (x <= bw) {
+        const h = (x === bw) ? 0 : heights[x];
+        if (stack.length === 0 || h >= heights[stack[stack.length - 1]]) {
+          stack.push(x++);
+        } else {
+          const top = stack.pop();
+          const height = heights[top];
+          const width = stack.length === 0 ? x : x - stack[stack.length - 1] - 1;
+          const area = height * width;
+          if (area > bestArea && height > 0 && width > 0) {
+            bestArea = area;
+            const rectW = width;
+            const rectH = height;
+            const rectX = stack.length === 0 ? 0 : (stack[stack.length - 1] + 1);
+            const rectY = y - rectH + 1;
+            best = { x: rectX, y: rectY, w: rectW, h: rectH };
+          }
+        }
+      }
+    }
+
+    return {
+      x: minX + best.x,
+      y: minY + best.y,
+      w: best.w,
+      h: best.h
+    };
+  }
+
+  // Fit font inside a rectangle (pixel units)
+  function fitFontToRect(ctx, text, rectPxW, rectPxH, maxPx, minPx = 8, paddingPx = 6) {
+    let size = Math.min(maxPx, Math.floor(Math.min(rectPxW, rectPxH) * 0.6));
+    const fits = (s) => {
+      ctx.font = `${s}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+      const w = ctx.measureText(text).width;
+      const h = s * 1.1;
+      return w <= rectPxW - 2*paddingPx && h <= rectPxH - 2*paddingPx;
+    };
+    let safety = 60;
+    while (safety-- > 0 && !fits(size) && size > minPx) size -= 0.5;
+    if (size < minPx) size = minPx;
+    ctx.font = `${size}px system-ui,-apple-system,Segoe UI,Roboto,sans-serif`;
+    return size;
+  }
+
+  // Draw outlines only; place label at largest-rectangle center
+  function renderWorksheetCanvas() {
+    const PAGE_W = 1800;
+    const MARGIN = 60;
+    const TITLE_H = 64;
+    const ND_H = 40;
+    const ND_GAP = 20;
+    const KEY_SWATCH = 28;
+    const KEY_CELL_W = 96;
+    const KEY_ROW_GAP = 12;
+    const GRID_MAX_W = PAGE_W - MARGIN*2;
+
+    // Key rows
+    const itemsPerRow = Math.max(1, Math.floor((PAGE_W - MARGIN*2) / KEY_CELL_W));
+    const keyRows = Math.ceil(palette.length / itemsPerRow);
+    const KEY_BLOCK_H = keyRows * (KEY_SWATCH + KEY_ROW_GAP) + 6;
+
+    // Cell size (fit width then height)
+    let cell = Math.max(16, Math.floor(GRID_MAX_W / gridW));
+    const usableH = 1200 - (MARGIN + TITLE_H + ND_H + ND_GAP + KEY_BLOCK_H + 20 + MARGIN);
+    const maxCellH = Math.floor(usableH / gridH);
+    cell = Math.min(cell, Math.max(12, maxCellH));
+    const gridDrawH = cell * gridH;
+
+    const c = document.createElement('canvas');
+    const PAGE_H = MARGIN + TITLE_H + ND_H + ND_GAP + KEY_BLOCK_H + 20 + gridDrawH + MARGIN;
+    c.width = PAGE_W; c.height = PAGE_H;
+    const ctx = c.getContext('2d');
+
+    // BG + headings
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,PAGE_W,PAGE_H);
+    ctx.fillStyle = '#000000'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.font = 'bold 36px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    ctx.fillText('Pixel Math Worksheet', MARGIN, MARGIN);
+
+    // Name / Date
+    const ndY = MARGIN + TITLE_H;
+    ctx.font = '18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    ctx.fillText('Name: ____________________________', MARGIN, ndY);
+    ctx.fillText('Date: ____________________________', MARGIN + 500, ndY);
+
+    // Key
+    let keyY = ndY + ND_H + ND_GAP;
+    ctx.font = 'bold 18px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    ctx.fillText('Color–Number Key:', MARGIN, keyY);
+    keyY += 8;
+
+    ctx.font = '16px system-ui,-apple-system,Segoe UI,Roboto,sans-serif';
+    let x = MARGIN, y = keyY + 36;
+
+    // Answer values mapping (user-editable)
+    let userAnswers = [];
+    const answersCard = document.getElementById('answersCard');
+    if (answersCard && answersCard.style.display !== 'none') {
+      userAnswers = Array.from(answersCard.querySelectorAll('input[type="number"]'))
+        .map(inp => parseFloat(inp.value));
+    }
+
+    palette.forEach((col, i) => {
+      if (x + KEY_CELL_W > PAGE_W - MARGIN) { x = MARGIN; y += KEY_SWATCH + KEY_ROW_GAP; }
+      ctx.fillStyle = col.hex;
+      ctx.fillRect(x, y - KEY_SWATCH / 2, KEY_SWATCH, KEY_SWATCH);
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
+      ctx.strokeRect(x, y - KEY_SWATCH / 2, KEY_SWATCH, KEY_SWATCH);
+      const ansVal = userAnswers[i] ?? (i + 1);
+      ctx.fillStyle = '#000'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(`= ${ansVal}`, x + KEY_SWATCH + 8, y);
+      x += KEY_CELL_W;
+    });
+
+    // Worksheet body (no grid)
+    const gridY = y + KEY_SWATCH/2 + 20;
+
+    // Outline regions (draw only boundary edges)
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = '#000';
+    ctx.fillStyle = '#000';
+
+    const drawBlockOutline = (blockIdx) => {
+      const block = blocks[blockIdx];
+      ctx.beginPath();
+      for (const ci of block.cells) {
+        const [cx, cy] = unlin(ci);
+        const x0 = MARGIN + cx * cell;
+        const y0 = gridY + cy * cell;
+
+        // neighbor block ids
+        const top = cy>0 ? cellToBlock[lin(cx,cy-1)] : -2;
+        const right = cx<gridW-1 ? cellToBlock[lin(cx+1,cy)] : -2;
+        const bottom = cy<gridH-1 ? cellToBlock[lin(cx,cy+1)] : -2;
+        const left = cx>0 ? cellToBlock[lin(cx-1,cy)] : -2;
+
+        if (top !== blockIdx)   { ctx.moveTo(x0, y0); ctx.lineTo(x0 + cell, y0); }
+        if (right !== blockIdx) { ctx.moveTo(x0 + cell, y0); ctx.lineTo(x0 + cell, y0 + cell); }
+        if (bottom !== blockIdx){ ctx.moveTo(x0, y0 + cell); ctx.lineTo(x0 + cell, y0 + cell); }
+        if (left !== blockIdx)  { ctx.moveTo(x0, y0); ctx.lineTo(x0, y0 + cell); }
+      }
+      ctx.stroke();
+    };
+
+    // Map color index → answer value
+    const colorAnswer = (ci)=> {
+      let ans = ci + 1;
+      if (answersCard && answersCard.style.display !== 'none') {
+        const inputs = answersCard.querySelectorAll('input[type="number"]');
+        if (inputs[ci]) {
+          const v = parseFloat(inputs[ci].value);
+          if (!isNaN(v)) ans = v;
+        }
+      }
+      return ans;
+    };
+
+    // 1) outlines
+    for (let bi=0; bi<blocks.length; bi++) drawBlockOutline(bi);
+
+    // 2) one label per region, centered in largest rectangle
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    for (const b of blocks) {
+      const ans = colorAnswer(b.colorIndex);
+      const problem = makeProblem(ans);
+      const rect = b.rect || { x: 0, y: 0, w: 1, h: 1 };
+      const rectPxW = rect.w * cell;
+      const rectPxH = rect.h * cell;
+      const maxFont = parseFloat(fontScaleEl.value) || 18;
+      fitFontToRect(ctx, problem, rectPxW, rectPxH, maxFont, 8, 6);
+      const px = MARGIN + (rect.x + rect.w/2) * cell;
+      const py = gridY + (rect.y + rect.h/2) * cell;
+      ctx.fillText(problem, px, py);
+    }
+
+    // Store dimensions for answer page
+    lastPageW = PAGE_W;
+    lastPageH = PAGE_H;
+    return c;
+  }
+
+  // Render page 2: full-page color answer grid (unchanged)
+  // Render page 2: Answer key with lightly colored regions and "problem = answer"
+// Render page 2: Answer key with lightly colored regions showing only the problem
+function renderAnswerCanvas() {
+  const PAGE_W = lastPageW || 1800;
+  const PAGE_H = lastPageH || 1300;
+  const MARGIN = 60;
+
+  const usableW = PAGE_W - 2*MARGIN;
+  const usableH = PAGE_H - 2*MARGIN;
+
+  const cellW = Math.floor(usableW / gridW);
+  const cellH = Math.floor(usableH / gridH);
+  const cell = Math.max(6, Math.min(cellW, cellH));
+
+  const gridDrawW = cell * gridW;
+  const gridDrawH = cell * gridH;
+
+  const xStart = Math.floor((PAGE_W - gridDrawW) / 2);
+  const yStart = Math.floor((PAGE_H - gridDrawH) / 2);
+
+  const c = document.createElement('canvas');
+  c.width = PAGE_W; c.height = PAGE_H;
+  const ctx = c.getContext('2d');
+
+  // White background
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0,0,PAGE_W,PAGE_H);
+
+  // Build a lookup for the problem text per block (same used for worksheet)
+  const answersCard = document.getElementById('answersCard');
+  const getAnswerVal = (colorIndex) => {
+    let ans = colorIndex + 1;
+    if (answersCard && answersCard.style.display !== 'none') {
+      const inputs = answersCard.querySelectorAll('input[type="number"]');
+      if (inputs[colorIndex]) {
+        const v = parseFloat(inputs[colorIndex].value);
+        if (!isNaN(v)) ans = v;
+      }
+    }
+    return ans;
+  };
+
+  // Draw regions with light fill + outlines + original problem only
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi];
+    const col = palette[block.colorIndex];
+    const ans = getAnswerVal(block.colorIndex);
+    const problem = makeProblem(ans); // same problem generation rule
+
+    const rect = block.rect || { x: 0, y: 0, w: 1, h: 1 };
+
+    // --- Light Fill (≈45% opacity) ---
+    ctx.fillStyle = col.hex + '73'; // hex 73 = ~45% alpha
+    ctx.beginPath();
+    for (const ci of block.cells) {
+      const [cx, cy] = unlin(ci);
+      ctx.rect(xStart + cx*cell, yStart + cy*cell, cell, cell);
+    }
+    ctx.fill();
+
+    // --- Outline Region ---
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const ci of block.cells) {
+      const [cx, cy] = unlin(ci);
+      const x0 = xStart + cx * cell;
+      const y0 = yStart + cy * cell;
+
+      const top = cy>0 ? cellToBlock[lin(cx,cy-1)] : -2;
+      const right = cx<gridW-1 ? cellToBlock[lin(cx+1,cy)] : -2;
+      const bottom = cy<gridH-1 ? cellToBlock[lin(cx,cy+1)] : -2;
+      const left = cx>0 ? cellToBlock[lin(cx-1,cy)] : -2;
+
+      if (top !== bi)   { ctx.moveTo(x0, y0); ctx.lineTo(x0 + cell, y0); }
+      if (right !== bi) { ctx.moveTo(x0 + cell, y0); ctx.lineTo(x0 + cell, y0 + cell); }
+      if (bottom !== bi){ ctx.moveTo(x0, y0 + cell); ctx.lineTo(x0 + cell, y0 + cell); }
+      if (left !== bi)  { ctx.moveTo(x0, y0); ctx.lineTo(x0, y0 + cell); }
+    }
+    ctx.stroke();
+
+    // --- Draw ONLY the original problem, centered ---
+    const rectPxW = rect.w * cell;
+    const rectPxH = rect.h * cell;
+    const maxFont = parseFloat(fontScaleEl.value) || 18;
+
+    fitFontToRect(ctx, problem, rectPxW, rectPxH, maxFont, 8, 6);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#000';
+
+    const tx = xStart + (rect.x + rect.w/2) * cell;
+    const ty = yStart + (rect.y + rect.h/2) * cell;
+    ctx.fillText(problem, tx, ty);
+  }
+
+  return c;
+}
+
+
+
+  // ---- File input / drop (UNCHANGED)
+  const drop = document.getElementById('drop');
+  const file = document.getElementById('file');
+  drop.addEventListener('click', ()=> file.click());
+
+  function handleFiles(files) {
+    if (!files || !files[0]) return;
+    const url = URL.createObjectURL(files[0]);
+    const imgNew = new Image();
+    imgNew.onload = () => { img = imgNew; imgLoaded = true; drawOrigFit(); URL.revokeObjectURL(url); };
+    imgNew.onerror = () => alert('Could not load that image.');
+    imgNew.src = url;
+  }
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+  drop.addEventListener('dragleave', ()=> drop.classList.remove('drag'));
+  drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('drag'); handleFiles(e.dataTransfer.files); });
+  file.addEventListener('change', e => handleFiles(e.target.files));
+
+  // ---- Buttons
+  document.getElementById('btnPixelate').addEventListener('click', ()=>{
+    if (!imgLoaded) { alert('Please upload an image first.'); return; }
+    const W = parseInt(colsEl.value,10) || 24;
+    const H = parseInt(rowsEl.value,10) || 24;
+    const K = parseInt(kEl.value,10)    || 6;
+    sampleToGrid(W,H);
+    clusterQuantize(K);
+    drawPixelatedPreview();
+
+    // Build Answer-Value UI for each palette color
+    const answersCard = document.getElementById('answersCard');
+    const answersContainer = document.getElementById('answersContainer');
+    answersContainer.innerHTML = '';
+    palette.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.style.display = 'flex';
+      row.style.alignItems = 'center';
+      row.style.marginBottom = '4px';
+
+      const swatch = document.createElement('div');
+      swatch.style.width = '20px';
+      swatch.style.height = '20px';
+      swatch.style.background = c.hex;
+      swatch.style.border = '1px solid #333';
+      swatch.style.marginRight = '8px';
+      row.appendChild(swatch);
+
+      const label = document.createElement('span');
+      label.textContent = `Color ${i + 1} =`;
+      label.style.marginRight = '6px';
+      row.appendChild(label);
+
+      const input = document.createElement('input');
+      input.type = 'number';
+      input.min = '-999'; input.max = '999';
+      input.step = '1';
+      input.value = i + 1;  // default mapping
+      input.dataset.index = i;
+      input.style.width = '70px';
+      input.style.padding = '2px 4px';
+      row.appendChild(input);
+
+      answersContainer.appendChild(row);
+    });
+
+    answersCard.style.display = 'block';
+
+    worksheetPreviewImg.removeAttribute('src');
+    answerPreviewImg.removeAttribute('src');
+  });
+
+  document.getElementById('btnGenerate').addEventListener('click', ()=>{
+    if (!imgLoaded || !indices.length) { alert('Pixelate the image first.'); return; }
+
+    // Build Tetris-style regions using user’s target size
+    let targetSize = parseInt(targetRegionEl.value, 10);
+    if (isNaN(targetSize) || targetSize < 1) targetSize = 4;
+    const maxPossible = gridW * gridH;
+    targetSize = Math.min(Math.max(1, targetSize), maxPossible);
+
+    buildTetrisRegions(targetSize);
+
+    // Page 1: worksheet (outlined regions, no grid; labels in largest rect)
+    const wsCanvas = renderWorksheetCanvas();
+    const wsURL = wsCanvas.toDataURL('image/png');
+    worksheetPreviewImg.src = wsURL;
+    worksheetPrintImg.src = wsURL;
+
+    // Conditionally include answer key
+    if (includeAnswerKeyEl.checked) {
+      const ansCanvas = renderAnswerCanvas();
+      const ansURL = ansCanvas.toDataURL('image/png');
+      answerPreviewImg.src = ansURL;
+      answerPrintImg.src = ansURL;
+      answerPrintImg.style.display = "block";
+    } else {
+      answerPreviewImg.removeAttribute('src');
+      answerPrintImg.removeAttribute('src');
+      answerPrintImg.style.display = "none";
+    }
+
+    worksheetPreviewImg.scrollIntoView({ behavior:'smooth', block:'center' });
+  });
+
+  document.getElementById('btnSave').addEventListener('click', ()=>{
+    if (!worksheetPrintImg.src) {
+      const proceed = confirm('You have not generated worksheet/answer images yet.\nOpen the print dialog anyway?');
+      if (!proceed) return;
+    }
+    window.print();
+  });
+
+  // Initial canvases
+  origCanvas.width = 360; origCanvas.height = 240;
+  pixCanvas.width  = 360; pixCanvas.height = 240;
+})();
+</script>
+</body>
+</html>
